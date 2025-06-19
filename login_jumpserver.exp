@@ -1,0 +1,32 @@
+#!/usr/bin/expect -f
+# 登录引擎: Jumpserver with Opt> menu
+
+# 读取参数
+if {[llength $argv] < 4} { exit 1 }
+set host       [lindex $argv 0]
+set user       [lindex $argv 1]
+set port       [lindex $argv 2]
+set password   [lindex $argv 3]
+set ssh_options [lrange $argv 4 end]
+
+# 启动 SSH
+spawn ssh -p $port {*}$ssh_options ${user}@${host}
+
+# --- Jumpserver 登录流程 ---
+# 步骤1: 输入密码
+expect -re ".*assword: ?"
+send "$password\r"
+
+# 步骤2: 等待 Opt> 菜单
+expect "Opt>"
+send "p\r"
+
+# 步骤3: 等待主机列表
+expect "\[Host\]>"
+
+# 步骤4: 唤醒界面
+# send ":\r"
+sleep 1
+
+# 步骤5: 交互
+interact

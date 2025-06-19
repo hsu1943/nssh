@@ -1,0 +1,63 @@
+#!/usr/bin/expect -f
+# 登录引擎: 堡垒机，能处理【可选的】动态验证码
+
+# 1. 读取参数 (这部分不变)
+if {[llength $argv] < 4} { exit 1 }
+set host       [lindex $argv 0]
+set user       [lindex $argv 1]
+set port       [lindex $argv 2]
+set password   [lindex $argv 3]
+set ssh_options [lrange $argv 4 end]
+
+# 2. 启动 SSH (这部分不变)
+spawn ssh -p $port {*}$ssh_options ${user}@${host}
+
+# 3. 处理固定的密码输入步骤
+expect {
+    timeout { send_user "错误：等待密码提示超时。\n"; exit 1 }
+    -re ".*assword: ?"
+}
+send "$password\r"
+
+# 4. *** 这是核心修改 ***
+# 使用一个 expect 块来同时等待“验证码”或“主机列表”
+# 这是处理条件分支的标准方法
+expect {
+  # 分支1: 如果需要验证码
+  "*Mfa Code*" {
+    # send_user "[等待输入验证码...]: "
+    expect_user -timeout 120 -re "(.*)\n" {
+        # 匹配成功后，发送捕获到的内容
+        # expect_out(1,string) 包含用户输入的内容（不含回车）
+        send "$expect_out(1,string)\r"
+    } timeout {
+        # 如果用户在120秒内没有输入
+        send_user "\n错误：等待验证码输入超时。\n"
+        exit 1
+    }
+    # 发送完验证码后，我们期望接下来出现主机列表。
+    # exp_continue 告诉 expect 留在这个 expect 块中，继续等待下一个匹配。
+    exp_continue
+  }
+
+  # 分支2: 如果直接出现主机列表 (或在输入验证码后出现)
+  "*NUM*" {
+    # 匹配到主机列表，说明登录的自动化部分已完成。
+    # 我们不需要再做什么，所以这里没有 exp_continue。
+    # expect 块会在这里成功结束。
+    sleep 1
+  }
+
+  # 错误处理
+  timeout {
+    send_user "错误：输入密码后，等待验证码或主机列表超时。\n"
+    exit 1
+  }
+  eof {
+      send_user "错误：连接在登录过程中意外关闭。\n"
+      exit 1
+  }
+}
+
+# 6. 交出控制权
+interact
