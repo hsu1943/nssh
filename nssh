@@ -88,6 +88,58 @@ connect_with_expect() {
   exec "$expect_script_to_run" "$host_hostname" "$host_user" "$host_port" "$host_pass" "$@"
 }
 
+
+# This function parses both config files and populates two global arrays:
+# host_order (an indexed array for order) and hosts_info (an associative array for details).
+get_all_hosts() {
+  # 1. Parse nssh_config using a more robust, multi-step approach.
+  if [ -f "$NSSH_CONFIG_FILE" ]; then
+    local nssh_aliases
+    nssh_aliases=$(grep -E "^\s*Host\s+" "$NSSH_CONFIG_FILE" | awk '{print $2}')
+
+    for alias in $nssh_aliases; do
+      if [[ "$alias" != "*" && -z "${hosts_info[$alias]}" ]]; then
+        local block
+        block=$(awk -v alias_to_find="$alias" '
+                  $1=="Host" && $2==alias_to_find {p=1}
+                  $1=="Host" && $2!=alias_to_find {p=0}
+                  p' "$NSSH_CONFIG_FILE")
+        
+        local logintype
+        logintype=$(echo "$block" | grep -E "^\s*LoginType\s+" | awk '{print $2}')
+        
+        # If LoginType is empty, default to "password".
+        if [ -z "$logintype" ]; then
+          logintype="password"
+        fi
+
+        # Map the found LoginType to a user-friendly label.
+        local label
+        case "$logintype" in
+          jumpserver)      label="Jumpserver" ;;
+          bastion_2fa_ali) label="Aliyun 2FA" ;;
+          "password")      label="Password" ;;
+          *)               label="Custom (${logintype})" ;;
+        esac
+        
+        hosts_info[$alias]="$label"
+        host_order+=("$alias")
+      fi
+    done
+  fi
+
+  # 2. Parse ssh/config for native hosts.
+  if [ -f "$SSH_CONFIG_FILE" ]; then
+    while read -r alias; do
+      if [[ "$alias" != "*" && -z "${hosts_info[$alias]}" ]]; then
+        hosts_info[$alias]="Key-based (Native)"
+        host_order+=("$alias")
+      fi
+    done < <(grep -E "^\s*Host\s+" "$SSH_CONFIG_FILE" | awk '{print $2}')
+  fi
+}
+
+
 # --- Main Logic ---
 
 # Handle primary commands first
@@ -97,53 +149,26 @@ fi
 
 if [[ "$1" == "-l" || "$1" == "--list" ]]; then
     shift
-    declare -A hosts
+    declare -A hosts_info
     declare -a host_order
-
-    if [ -f "$NSSH_CONFIG_FILE" ]; then
-      while IFS= read -r line; do
-        line_trimmed=$(echo "$line" | sed -e 's/^[[:space:]]*//')
-        if [[ "$line_trimmed" =~ ^Host[[:space:]]+([^[:space:]]+) && "${BASH_REMATCH[1]}" != "*" ]]; then
-          alias="${BASH_REMATCH[1]}"
-          if [[ -z "${hosts[$alias]}" ]]; then
-            hosts[$alias]="nssh"
-            host_order+=("$alias")
-          fi
-        fi
-      done < "$NSSH_CONFIG_FILE"
-    fi
-
-    if [ -f "$SSH_CONFIG_FILE" ]; then
-      while IFS= read -r line; do
-        line_trimmed=$(echo "$line" | sed -e 's/^[[:space:]]*//')
-        if [[ "$line_trimmed" =~ ^Host[[:space:]]+([^[:space:]]+) && "${BASH_REMATCH[1]}" != "*" ]]; then
-          alias="${BASH_REMATCH[1]}"
-          if [[ -z "${hosts[$alias]}" ]]; then
-            hosts[$alias]="ssh"
-            host_order+=("$alias")
-          fi
-        fi
-      done < "$SSH_CONFIG_FILE"
-    fi
+    get_all_hosts # Call the function to populate the arrays.
 
     if [ ${#host_order[@]} -eq 0 ]; then
       echo "No hosts configured in $NSSH_CONFIG_FILE or $SSH_CONFIG_FILE."
       exit 0
     fi
 
+    # Now, with the arrays populated, start the user interaction.
     echo "Available hosts:"
-    echo "--------------------------------------------------"
-    printf "%-5s %-25s %-15s\n" "NUM" "HOST ALIAS" "LOGIN TYPE"
-    echo "--------------------------------------------------"
+    echo "--------------------------------------------------------"
+    printf "%-5s %-25s %-20s\n" "NUM" "HOST ALIAS" "LOGIN TYPE"
+    echo "--------------------------------------------------------"
     for i in "${!host_order[@]}"; do
       alias="${host_order[i]}"
-      type_label="Native SSH"
-      if [[ "${hosts[$alias]}" == "nssh" ]]; then
-        type_label="Password/2FA"
-      fi
+      type_label="${hosts_info[$alias]}"
       printf "%3d)  %-25s [%s]\n" "$((i+1))" "$alias" "$type_label"
     done
-    echo "--------------------------------------------------"
+    echo "--------------------------------------------------------"
     echo ""
 
     choice=""
@@ -157,7 +182,7 @@ if [[ "$1" == "-l" || "$1" == "--list" ]]; then
         echo "Invalid selection. Please try again."
       fi
     done
-    exit 0 # Should not be reached, but good practice
+    exit 0
 fi
 
 # Default behavior: route the connection based on the host alias
