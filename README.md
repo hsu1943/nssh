@@ -5,16 +5,16 @@
 ```shell
 nssh -l
 Available hosts:
---------------------------------------------------
-NUM   HOST ALIAS                LOGIN TYPE     
---------------------------------------------------
-  1)  test-pass                 [Password/2FA]
-  2)  pre                       [Password/2FA]
-  3)  online                    [Password/2FA]
-  4)  test                      [Native SSH]
---------------------------------------------------
+--------------------------------------------------------
+NUM   HOST ALIAS                LOGIN TYPE          
+--------------------------------------------------------
+  1)  test-pass                 [Password]
+  2)  pre                       [Jumpserver]
+  3)  online                    [Aliyun 2FA]
+  4)  test                      [Key-based (Native)]
+--------------------------------------------------------
 
-Enter number to connect (or 'q' to quit): 
+Enter number to connect (or 'q' to quit):
 ```
 
 ## 原生ssh登录(密钥登录)
